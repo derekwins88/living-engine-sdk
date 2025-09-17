@@ -1,0 +1,41 @@
+[project]
+name = "living-engine-sdk"
+version = "0.1.0"
+description = "Reusable components for the Living Engine (entropy classification, strategies, proof capsules, narrative)."
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["trading", "entropy", "strategy", "proof", "narrative"]
+authors = [{name = "Living Engine", email = "you@example.com"}]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/your-org/living-engine-sdk"
+Issues = "https://github.com/your-org/living-engine-sdk/issues"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]
+select = ["E", "F", "W", "B"]
