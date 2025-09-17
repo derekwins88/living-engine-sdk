@@ -1,59 +1,44 @@
-# living-engine-sdk
+# living-engine-sdk (umbrella)
 
-A reusable Python package for the **Living Engine** research project. It ships a small but
-cohesive toolkit so you can classify entropy regimes, experiment with deterministic trading
-strategies, generate proof capsules, and narrate the resulting session.
+This repository now acts as an umbrella for the Living Engine platform. The Python SDK lives in
+`packages/sdk`, and optional companion projects (such as the backtest harness) can be attached under
+`packages/` as git submodules.
 
-## Features
-
-- **Entropy classification** – convert scalar entropy into `P-like`, `NP-drift`, or
-  `collapse` regimes with unicode glyphs for quick visualization.
-- **Strategy API** – a lightweight interface (`StrategyBase`) that standardizes strategy
-  lifecycle hooks.
-- **Reference strategy** – `ImmCore` demonstrates how to combine entropy classification with
-  classic EMA crossovers.
-- **ProofBridge** – writes a CSV ledger and JSONL capsule stream, plus a convenient
-  `sha256_file` helper.
-- **Narrative helper** – summarize a trading session in a human-readable block of text.
-
-## Installation
-
-```bash
-pip install -e .
+## Repository layout
+```
+living-engine-sdk/
+├─ packages/
+│  ├─ sdk/         # main Python SDK (installable package, tests, examples)
+│  └─ backtest/    # optional submodule → live-living-engine-backtest
+├─ docs/           # architecture overview + capsule schema references
+└─ .github/        # CI configuration
 ```
 
-Optional development dependencies:
-
+## Get started
 ```bash
-pip install -U pip pytest pre-commit
+git clone https://github.com/your-org/living-engine-sdk
+cd living-engine-sdk
+pip install pre-commit
 pre-commit install
+
+cd packages/sdk
+pip install -e .
+pytest
 ```
 
-## Quick start
-
-```python
-from living_engine.imm_core import ImmCore
-
-params = {
-    "entropy": {"P_threshold": 0.045, "NP_threshold": 0.09, "CollapseThreshold": 0.09},
-    "signals": {"EmaFast": 12, "EmaSlow": 30},
-}
-
-strategy = ImmCore(params)
-strategy.on_start()
-order, capsule = strategy.on_bar({"timestamp": "t0", "close": 75.2, "entropy": 0.038})
-print(order, capsule)
+## Add the backtest harness (optional)
+```bash
+git submodule add https://github.com/<you>/live-living-engine-backtest packages/backtest
+git commit -m "chore: add backtest submodule"
 ```
 
-See [`examples/run_example.py`](examples/run_example.py) for a runnable script that wires
-strategies, the proof bridge, and narrative helper together.
+With the submodule attached, CI will run the harness' smoke scenario using the bundled sample
+configuration and CSV. The job expects the script to emit a `metrics.json` artifact.
 
-## Development
+## CI summary
+- **`sdk-tests`** installs the SDK from `packages/sdk`, runs pre-commit, and executes `pytest`.
+- **`backtest-smoke`** runs only when `packages/backtest` exists and verifies that the harness can
+  produce proof artifacts from its default sample data.
 
-- Formatters and linters are managed through [`pre-commit`](.pre-commit-config.yaml).
-- Tests live in [`tests/`](tests/).
-- GitHub Actions run both test and lint steps via [`ci.yml`](.github/workflows/ci.yml).
-
-## License
-
-This project is distributed under the terms of the [MIT License](LICENSE).
+For more platform context, see [`docs/overview.md`](docs/overview.md) and the capsule schema in
+[`docs/capsule_schema.md`](docs/capsule_schema.md).

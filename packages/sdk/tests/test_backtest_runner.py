@@ -23,8 +23,12 @@ def _read_csv(p: Path) -> pd.DataFrame:
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_backtest_runs_and_emits_artifacts(tmp_path: Path) -> None:
     """Smoke test: run one pass and validate blotter + capsule structure."""
-    cfg_path = Path(os.environ.get("LE_CONFIG_PATH", "config/default.yaml"))
-    csv_path = Path(os.environ.get("LE_DATA_PATH", "data/sample.csv"))
+    sdk_root = Path(__file__).resolve().parents[1]
+    default_cfg = sdk_root / "config/default.yaml"
+    default_csv = sdk_root / "data/sample.csv"
+
+    cfg_path = Path(os.environ.get("LE_CONFIG_PATH", default_cfg))
+    csv_path = Path(os.environ.get("LE_DATA_PATH", default_csv))
     assert cfg_path.exists(), "missing config/default.yaml"
     assert csv_path.exists(), "missing data/sample.csv"
 

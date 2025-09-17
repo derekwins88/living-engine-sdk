@@ -9,15 +9,17 @@ recommended workflow when contributing changes.
 git clone https://github.com/your-org/living-engine-sdk.git
 cd living-engine-sdk
 python -m venv .venv && source .venv/bin/activate
-pip install -e .
 pip install -U pip pytest pre-commit
 pre-commit install
+
+cd packages/sdk
+pip install -e .
 ```
 
 ## Development workflow
 
 - Create feature branches from `main`.
-- Run `pytest` and `pre-commit run --all-files` before pushing.
+- Run `cd packages/sdk && pytest` and `pre-commit run --all-files` before pushing.
 - Update documentation, examples, and changelog entries when behavior changes.
 - Keep pull requests focused and describe the motivation clearly in the PR template.
 
