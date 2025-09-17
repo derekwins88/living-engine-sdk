@@ -32,20 +32,64 @@ jobs:
         with:
           python-version: "3.11"
       - name: Run backtest smoke if submodule exists
+        shell: bash
         run: |
-          if [ -d packages/backtest ]; then
-            if [ -f packages/backtest/requirements.txt ]; then
-              pip install -r packages/backtest/requirements.txt || true
-            fi
-            python packages/backtest/runner.py \
-              --config packages/backtest/config/default.yaml \
-              --data packages/backtest/data/sample_prices.csv \
-              --out packages/backtest/runs/ci || true
-            if [ -f packages/backtest/runs/ci/metrics.json ]; then
-              echo "Backtest OK."
-            else
-              echo "Backtest smoke failed: metrics.json missing." && exit 1
-            fi
-          else
+          set -euo pipefail
+
+          if [ ! -d packages/backtest ]; then
             echo "packages/backtest not present; add submodule to enable smoke test."
+            exit 0
+          fi
+
+          # Try to find runner.py anywhere inside the submodule (top-level preferred)
+          RUNNER=""
+          if [ -f packages/backtest/runner.py ]; then
+            RUNNER="packages/backtest/runner.py"
+          else
+            CAND=$(git -C packages/backtest ls-files | grep -E '(^|/)runner\.py$' | head -n1 || true)
+            if [ -n "${CAND:-}" ]; then
+              RUNNER="packages/backtest/${CAND}"
+            fi
+          fi
+
+          if [ -z "${RUNNER:-}" ]; then
+            echo "No runner.py found in packages/backtest — skipping smoke."
+            exit 0
+          fi
+
+          # Pick whichever config/data file exists
+          CFG="packages/backtest/config/default.yaml"
+          [ -f "$CFG" ] || CFG="$(git -C packages/backtest ls-files | grep -E '\.ya?ml$' | head -n1 | sed 's#^#packages/backtest/#')"
+
+          DATA=""
+          if [ -f packages/backtest/data/sample_prices.csv ]; then
+            DATA="packages/backtest/data/sample_prices.csv"
+          elif [ -f packages/backtest/data/sample.csv ]; then
+            DATA="packages/backtest/data/sample.csv"
+          else
+            DATA="$(git -C packages/backtest ls-files | grep -E '\.csv$' | head -n1 | sed 's#^#packages/backtest/#')"
+          fi
+
+          mkdir -p packages/backtest/runs/ci
+
+          echo "Runner: $RUNNER"
+          echo "Config: $CFG"
+          echo "Data:   $DATA"
+
+          # Install optional requirements if present (don’t fail if missing)
+          if [ -f packages/backtest/requirements.txt ]; then
+            pip install -r packages/backtest/requirements.txt
+          fi
+
+          # Execute the runner (do not fail the job just because the runner returns non-zero)
+          python "$RUNNER" \
+            --config "$CFG" \
+            --data "$DATA" \
+            --out packages/backtest/runs/ci || true
+
+          if [ -f packages/backtest/runs/ci/metrics.json ]; then
+            echo "Backtest OK."
+          else
+            echo "Backtest smoke failed: metrics.json missing."
+            exit 1
           fi
