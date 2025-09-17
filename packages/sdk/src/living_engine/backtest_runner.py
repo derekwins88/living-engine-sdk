@@ -149,13 +149,14 @@ class BacktestRunner:
                 w.writerow(t)
 
         verdict = "P≠NP (claim)" if collapse_hits > 0 else "OPEN"
+        sdk_root = Path(__file__).resolve().parents[2]
+        sample_csv = sdk_root / "data/sample.csv"
+
         capsule = {
             "schema_version": "capsule-1.1.0",
             "created_utc": __import__("datetime").datetime.utcnow().isoformat() + "Z",
             "data_source": "in-memory",
-            "data_sha256": (
-                sha256_file(Path("data/sample.csv")) if Path("data/sample.csv").exists() else ""
-            ),
+            "data_sha256": sha256_file(sample_csv) if sample_csv.exists() else "",
             "params": self.cfg,
             "verdict": verdict,
             "evidence": {"collapse_hits": collapse_hits},

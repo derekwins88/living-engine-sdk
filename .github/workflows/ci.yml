@@ -1,22 +1,51 @@
-name: lint-and-test
+name: sdk-umbrella-ci
 on: [push, pull_request]
 
 jobs:
-  ci:
+  sdk-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install package (editable) + tools
+      - name: Install lint tooling
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files
+      - name: Install SDK and run tests
+        working-directory: packages/sdk
         run: |
           pip install -e .
-          pip install -U pip pytest pre-commit
+          pip install pytest
+          pytest -q
 
-      - name: Run pytest
-        run: pytest -q
-
-      - name: Run pre-commit
-        run: pre-commit run --all-files
+  backtest-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run backtest smoke if submodule exists
+        run: |
+          if [ -d packages/backtest ]; then
+            if [ -f packages/backtest/requirements.txt ]; then
+              pip install -r packages/backtest/requirements.txt || true
+            fi
+            python packages/backtest/runner.py \
+              --config packages/backtest/config/default.yaml \
+              --data packages/backtest/data/sample_prices.csv \
+              --out packages/backtest/runs/ci || true
+            if [ -f packages/backtest/runs/ci/metrics.json ]; then
+              echo "Backtest OK."
+            else
+              echo "Backtest smoke failed: metrics.json missing." && exit 1
+            fi
+          else
+            echo "packages/backtest not present; add submodule to enable smoke test."
+          fi
