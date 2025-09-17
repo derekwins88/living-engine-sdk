@@ -1,123 +1,176 @@
-"""Utilities for running simple backtests against Living Engine strategies."""
-
 from __future__ import annotations
 
-from importlib import import_module
-from typing import Any, Dict, List, Optional, Tuple
+import csv
+import json
+import math
+from pathlib import Path
+from typing import Dict
 
-import pandas as pd
+try:
+    import yaml
+except Exception:  # pragma: no cover
+    yaml = None
 
-from .strategy_api import Capsule, StrategyBase
+from living_engine.imm_core import ImmCore
+from living_engine.narrative import make_day_summary
+from living_engine.proofbridge import ProofBridge, sha256_file
+
+
+def _read_yaml(path: Path) -> Dict:
+    if yaml is None:
+        # ultra-minimal fallback for your default.yaml structure
+        out, section = {}, None
+        for line in Path(path).read_text().splitlines():
+            if not line.strip() or line.strip().startswith("#"):
+                continue
+            if not line.startswith(" "):
+                key = line.split(":", 1)[0].strip()
+                out[key] = {}
+                section = key
+            else:
+                kv = line.strip().split(":", 1)
+                if len(kv) != 2:
+                    continue
+                k, v = kv[0], kv[1].strip()
+                if v.lower() in ("true", "false"):
+                    v = v.lower() == "true"
+                else:
+                    try:
+                        v = float(v) if "." in v else int(v)
+                    except Exception:
+                        v = v.strip().strip('"').strip("'")
+                out[section][k] = v
+        return out
+    return yaml.safe_load(Path(path).read_text())
+
+
+def _sharpe(returns) -> float:
+    if len(returns) < 2:
+        return 0.0
+    mu = sum(returns) / len(returns)
+    var = sum((x - mu) ** 2 for x in returns) / max(1, len(returns) - 1)
+    sd = math.sqrt(var) if var > 0 else 0.0
+    return (mu / sd * math.sqrt(252)) if sd > 0 else 0.0
 
 
 class BacktestRunner:
-    """Execute a single-pass backtest and summarize the results."""
+    """Tiny orchestrator used by tests and examples."""
 
-    def __init__(self, config: Dict[str, Any], data: pd.DataFrame):
-        self.config = config
-        self._backtest_cfg = config.get("backtest", {})
-        self.data = self._prepare_data(data)
-        self.strategy = self._build_strategy(config.get("strategy", {}))
+    def __init__(self, config: Dict, frame):
+        self.cfg = config
+        self.df = frame.copy()
 
-    # ------------------------------------------------------------------
-    def _prepare_data(self, data: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(data, pd.DataFrame):
-            raise TypeError("data must be a pandas DataFrame")
-        timestamp_col = self._backtest_cfg.get("timestamp_column", "timestamp")
-        if timestamp_col not in data.columns:
-            raise ValueError(f"Missing required column: {timestamp_col}")
+    @classmethod
+    def from_files(cls, cfg_path: str | Path, csv_path: str | Path) -> "BacktestRunner":
+        cfg = _read_yaml(Path(cfg_path))
+        import pandas as pd
 
-        frame = data.copy()
-        frame[timestamp_col] = pd.to_datetime(frame[timestamp_col], errors="coerce")
-        frame = frame.dropna(subset=[timestamp_col])
-        frame = frame.sort_values(timestamp_col).reset_index(drop=True)
-        return frame
+        df = pd.read_csv(csv_path)
+        return cls(cfg, df)
 
-    def _build_strategy(self, strategy_cfg: Dict[str, Any]) -> StrategyBase:
-        module_name = strategy_cfg.get("module", "living_engine.imm_core")
-        class_name = strategy_cfg.get("class", "ImmCore")
-        params = strategy_cfg.get("params", {})
+    def run(self, outdir: str | Path) -> Dict[str, str]:
+        out = Path(outdir)
+        out.mkdir(parents=True, exist_ok=True)
 
-        module = import_module(module_name)
-        try:
-            strategy_cls = getattr(module, class_name)
-        except AttributeError as exc:  # pragma: no cover - configuration error
-            raise ImportError(f"Strategy class '{class_name}' not found in '{module_name}'.") from exc
+        strat = ImmCore(self.cfg)
+        pb = ProofBridge(out / "proof_ledger.csv", out / "capsules.jsonl")
 
-        strategy = strategy_cls(params)
-        if not isinstance(strategy, StrategyBase):  # pragma: no cover - defensive
-            raise TypeError("Strategy must inherit from StrategyBase.")
-        return strategy
+        cash = 50_000.0
+        pos = 0
+        equity_curve = []
+        trades = []
+        collapse_hits = 0
 
-    # ------------------------------------------------------------------
-    def run(self) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-        """Run the backtest and return a blotter plus a proof capsule summary."""
-
-        timestamp_col = self._backtest_cfg.get("timestamp_column", "timestamp")
-        price_col = self._backtest_cfg.get("price_column", "close")
-        claim = self._backtest_cfg.get("claim", "P≠NP")
-
-        blotter_records: List[Dict[str, Any]] = []
-        capsule_log: List[Capsule] = []
-        entry_time: Optional[Any] = None
-        entry_price: Optional[float] = None
-        final_verdict = "INCONCLUSIVE"
-
-        self.strategy.on_start()
-        for _, row in self.data.iterrows():
-            bar = row.to_dict()
-            order, capsule = self.strategy.on_bar(bar)
-
-            if capsule:
-                capsule_log.append(capsule)
-                verdict = capsule.get("verdict")
-                if verdict:
-                    final_verdict = verdict
-
-            if order:
-                side = order.get("side")
-                if side == "long":
-                    entry_time = bar.get(timestamp_col)
-                    price = bar.get(price_col)
-                    entry_price = float(price) if price is not None else None
-                elif side == "flat" and entry_time is not None and entry_price is not None:
-                    exit_time = bar.get(timestamp_col)
-                    price = bar.get(price_col, entry_price)
-                    exit_price = float(price) if price is not None else entry_price
-                    pnl = exit_price - entry_price
-                    blotter_records.append(
-                        {
-                            "entry_time": entry_time,
-                            "exit_time": exit_time,
-                            "pnl": pnl,
-                        }
-                    )
-                    entry_time = None
-                    entry_price = None
-
-        self.strategy.on_finish()
-
-        blotter = pd.DataFrame(blotter_records, columns=["entry_time", "exit_time", "pnl"])
-
-        def _serialize_timestamp(value: Any) -> Any:
-            if hasattr(value, "isoformat"):
-                return value.isoformat()
-            return value
-
-        entropy_trace: List[Dict[str, Any]] = [
-            {
-                "timestamp": _serialize_timestamp(capsule.get("timestamp")),
-                "entropy": capsule.get("entropy"),
-                "regime": capsule.get("regime"),
+        strat.on_start()
+        for _, r in self.df.iterrows():
+            bar = {
+                "timestamp": str(r["timestamp"]),
+                "symbol": str(r.get("symbol", "X")),
+                "open": float(r["open"]),
+                "high": float(r["high"]),
+                "low": float(r["low"]),
+                "close": float(r["close"]),
+                "volume": float(r["volume"]),
+                "entropy": float(r.get("entropy", 0.0)),
             }
-            for capsule in capsule_log
-        ]
-        capsule_summary = {
-            "claim": claim,
-            "verdict": final_verdict,
-            "entropy_trace": entropy_trace,
+            price = bar["close"]
+            order, capsule = strat.on_bar(bar)
+
+            if capsule and capsule.get("verdict") == "P≠NP (claim)":
+                collapse_hits += 1
+            if capsule:
+                pb.write_capsule(bar["timestamp"], capsule)
+
+            if order and order.get("side") == "long" and pos == 0:
+                stop_dist = price * 0.005
+                risk_cap = cash * float(self.cfg["risk"]["RiskPercent"])
+                size = max(1, int(risk_cap / max(1e-9, stop_dist)))
+                cash -= size * price
+                pos = size
+                trades.append({"ts": bar["timestamp"], "action": "BUY", "px": price, "size": size})
+
+            elif order and order.get("side") == "flat" and pos != 0:
+                cash += pos * price
+                trades.append({"ts": bar["timestamp"], "action": "SELL", "px": price, "size": pos})
+                pos = 0
+
+            equity_curve.append(cash + pos * price)
+
+        strat.on_finish()
+
+        returns = []
+        for i in range(1, len(equity_curve)):
+            prev, cur = equity_curve[i - 1], equity_curve[i]
+            returns.append((cur - prev) / prev if prev else 0.0)
+
+        peak = equity_curve[0]
+        maxdd = 0.0
+        for v in equity_curve:
+            if v > peak:
+                peak = v
+            dd = (peak - v) / peak if peak > 0 else 0.0
+            if dd > maxdd:
+                maxdd = dd
+
+        metrics = {
+            "start_equity": 50_000.0,
+            "final_equity": equity_curve[-1],
+            "num_trades": len([t for t in trades if t["action"] == "BUY"]),
+            "sharpe": _sharpe(returns),
+            "max_drawdown": maxdd,
         }
-        return blotter, capsule_summary
 
+        # write blotter
+        blotter_path = out / "trades_blotter.csv"
+        with open(blotter_path, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["ts", "action", "px", "size"])
+            w.writeheader()
+            for t in trades:
+                w.writerow(t)
 
-__all__ = ["BacktestRunner"]
+        verdict = "P≠NP (claim)" if collapse_hits > 0 else "OPEN"
+        capsule = {
+            "schema_version": "capsule-1.1.0",
+            "created_utc": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+            "data_source": "in-memory",
+            "data_sha256": (
+                sha256_file(Path("data/sample.csv")) if Path("data/sample.csv").exists() else ""
+            ),
+            "params": self.cfg,
+            "verdict": verdict,
+            "evidence": {"collapse_hits": collapse_hits},
+            "metrics": metrics,
+        }
+        capsule_path = out / "proof_capsule.json"
+        capsule_path.write_text(json.dumps(capsule, indent=2))
+
+        (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
+        (out / "summary.txt").write_text(make_day_summary(metrics, pb.stats(), verdict))
+
+        pb.close()
+        return {
+            "blotter": str(blotter_path),
+            "capsule": str(capsule_path),
+            "metrics": str(out / "metrics.json"),
+            "summary": str(out / "summary.txt"),
+        }

@@ -2,51 +2,50 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pandas as pd
 import pytest
 import yaml
 
 from living_engine.backtest_runner import BacktestRunner
-import os
-import json
-import yaml
-import pandas as pd
 
-from living_engine.backtest_runner import BacktestRunner
 
-CFG_PATH = os.path.join("config", "default.yaml")
-CSV_PATH = os.path.join("data", "sample.csv")
-
-def load_config():
-    with open(CFG_PATH, "r") as f:
+def _read_yaml(p: Path) -> dict:
+    with open(p, "r") as f:
         return yaml.safe_load(f)
 
-def load_data():
-    return pd.read_csv(CSV_PATH, parse_dates=["timestamp"])
 
-def test_backtest_runs_and_outputs(tmp_path):
-    config = load_config()
-    data = load_data()
+def _read_csv(p: Path) -> pd.DataFrame:
+    return pd.read_csv(p, parse_dates=["timestamp"])
 
-    runner = BacktestRunner(config, data)
-    blotter, capsule = runner.run()
 
-    # --- Blotter assertions ---
-    assert isinstance(blotter, pd.DataFrame)
-    assert "entry_time" in blotter.columns
-    assert "exit_time" in blotter.columns
-    assert "pnl" in blotter.columns
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_backtest_runs_and_emits_artifacts(tmp_path: Path) -> None:
+    """Smoke test: run one pass and validate blotter + capsule structure."""
+    cfg_path = Path(os.environ.get("LE_CONFIG_PATH", "config/default.yaml"))
+    csv_path = Path(os.environ.get("LE_DATA_PATH", "data/sample.csv"))
+    assert cfg_path.exists(), "missing config/default.yaml"
+    assert csv_path.exists(), "missing data/sample.csv"
 
-    # --- Capsule assertions ---
-    assert isinstance(capsule, dict)
-    assert "claim" in capsule
-    assert "verdict" in capsule
-    assert "entropy_trace" in capsule
+    config = _read_yaml(cfg_path)
+    data = _read_csv(csv_path)
 
-    # --- Export check ---
-    out_file = tmp_path / "capsule.json"
-    with open(out_file, "w") as f:
-        json.dump(capsule, f, indent=2)
+    runner = BacktestRunner(config=config, frame=data)
+    artifacts = runner.run(outdir=tmp_path)
 
-    assert out_file.exists()
+    # Files should exist
+    for key in ["blotter", "capsule", "metrics", "summary"]:
+        assert key in artifacts
+        assert Path(artifacts[key]).exists(), f"{key} not written"
+
+    # Blotter sanity
+    blotter = pd.read_csv(artifacts["blotter"])
+    assert set({"ts", "action", "px", "size"}).issubset(blotter.columns)
+    # Either we traded, or we cleanly chose not to; both are valid. Just ensure schema is OK.
+    assert blotter.dtypes["px"].kind in ("f", "i")
+
+    # Capsule sanity
+    capsule = json.loads(Path(artifacts["capsule"]).read_text())
+    for k in ["schema_version", "verdict", "params", "metrics", "evidence", "data_sha256"]:
+        assert k in capsule

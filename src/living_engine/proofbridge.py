@@ -1,10 +1,3 @@
-from __future__ import annotations
-
-import csv
-import hashlib
-import json
-from pathlib import Path
-from typing import Any, Dict
 """Utilities for writing proof ledgers and capsules."""
 
 from __future__ import annotations
@@ -13,7 +6,7 @@ import csv
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, IO, Iterable
+from typing import IO, Any, Dict, Iterable
 
 Capsule = Dict[str, Any]
 
