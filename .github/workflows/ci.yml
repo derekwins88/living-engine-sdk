@@ -1,23 +1,22 @@
-name: CI
-
-on:
-  push:
-  pull_request:
+name: lint-and-test
+on: [push, pull_request]
 
 jobs:
-  lint-and-test:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install dependencies
+
+      - name: Install package (editable) + tools
         run: |
-          python -m pip install --upgrade pip
           pip install -e .
-          pip install pytest pre-commit
+          pip install -U pip pytest pre-commit
+
       - name: Run pytest
-        run: pytest
+        run: pytest -q
+
       - name: Run pre-commit
         run: pre-commit run --all-files

@@ -89,8 +89,12 @@ class ImmCore(StrategyBase):
         entropy_value = float(bar.get("entropy", 0.0))
 
         # Update moving averages.
-        self.state["ema_fast"] = _ema(self.state.get("ema_fast"), price, self._signal_cfg.fast_period)
-        self.state["ema_slow"] = _ema(self.state.get("ema_slow"), price, self._signal_cfg.slow_period)
+        self.state["ema_fast"] = _ema(
+            self.state.get("ema_fast"), price, self._signal_cfg.fast_period
+        )
+        self.state["ema_slow"] = _ema(
+            self.state.get("ema_slow"), price, self._signal_cfg.slow_period
+        )
 
         regime = classify_regime(
             entropy_value,

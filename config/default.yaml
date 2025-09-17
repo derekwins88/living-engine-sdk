@@ -1,15 +1,9 @@
-strategy:
-  module: living_engine.imm_core
-  class: ImmCore
-  params:
-    entropy:
-      P_threshold: 0.05
-      NP_threshold: 0.1
-      CollapseThreshold: 0.2
-    signals:
-      EmaFast: 3
-      EmaSlow: 5
-backtest:
-  claim: "P≠NP"
-  price_column: close
-  timestamp_column: timestamp
+risk:
+  RiskPercent: 0.002
+entropy:
+  P_threshold: 0.05
+  NP_threshold: 0.1
+  CollapseThreshold: 0.2
+signals:
+  EmaFast: 3
+  EmaSlow: 5
